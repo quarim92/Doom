@@ -3,230 +3,52 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>DOOM P2P TWA</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <title>Cube Brawl P2P</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        @font-face {
-            font-family: 'DoomFont';
-            src: url('https://fonts.cdnfonts.com/s/73151/DooM.woff') format('woff');
-        }
-        body { margin: 0; overflow: hidden; background: #000; touch-action: none; font-family: 'Courier New', Courier, monospace; }
-        #lobby {
-            position: absolute; inset: 0; background: radial-gradient(circle, #440000 0%, #000 100%);
-            z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #ff0000;
-        }
-        .doom-title { font-size: 48px; text-shadow: 4px 4px #000; margin-bottom: 40px; }
-        .menu-card { background: rgba(0,0,0,0.8); padding: 30px; border: 3px solid #666; display: flex; flex-direction: column; gap: 15px; align-items: center; }
-        .btn { background: #800; color: #fff; border: 2px solid #f00; padding: 12px 24px; font-weight: bold; cursor: pointer; width: 200px; text-transform: uppercase; }
-        .btn:active { background: #f00; }
-        input { background: #111; border: 1px solid #f00; color: #fff; padding: 10px; font-size: 18px; text-align: center; width: 180px; }
-        #game-ui { display: none; position: absolute; inset: 0; pointer-events: none; }
-        #hud-bottom {
-            position: absolute; bottom: 0; left: 0; width: 100%; height: 70px;
-            background: linear-gradient(to bottom, #444, #222); border-top: 4px solid #000;
-            display: flex; justify-content: space-around; align-items: center; pointer-events: auto;
-        }
-        .hud-stat { text-align: center; border: 2px inset #666; background: #111; padding: 2px 15px; width: 80px; }
-        .hud-label { font-size: 10px; color: #999; display: block; }
-        .hud-value { font-size: 24px; color: #ff0000; font-weight: bold; }
-        #marine-face { width: 60px; height: 60px; border: 2px solid #555; background: #333; font-size: 30px; display: flex; align-items: center; justify-content: center; }
-        #weapon-layer { position: absolute; bottom: 70px; left: 50%; transform: translateX(-50%); width: 320px; height: 280px; transition: transform 0.05s; }
-        .weapon-img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
-        #flash {
-            position: absolute; bottom: 200px; left: 50%; transform: translateX(-50%);
-            width: 80px; height: 80px; background: radial-gradient(circle, #fff 10%, #ff0 40%, transparent 70%);
-            display: none; border-radius: 50%; opacity: 0.8;
-        }
-        .joy-area { position: absolute; bottom: 70px; width: 50%; height: 75%; pointer-events: auto; }
-        #left-area { left: 0; }
-        #right-area { right: 0; }
-        .joy-viz {
-            position: absolute; width: 60px; height: 60px; border: 2px solid rgba(255,0,0,0.4);
-            border-radius: 50%; display: none; background: rgba(255,0,0,0.1);
-        }
-        .joy-knob { position: absolute; width: 30px; height: 30px; background: #f00; border-radius: 50%; top: 50%; left: 50%; transform: translate(-50%, -50%); }
-        #room-tag { position: absolute; top: 10px; left: 10px; font-size: 12px; color: #0f0; background: rgba(0,0,0,0.6); padding: 5px; }
+        body { margin: 0; background: #0f172a; overflow: hidden; }
+        canvas { display: block; }
     </style>
 </head>
 <body>
+    <div id="root"></div>
 
-<div id="lobby">
-    <div class="doom-title">DOOM P2P</div>
-    <div class="menu-card">
-        <button class="btn" onclick="hostGame()">Создать игру</button>
-        <span style="font-size: 10px; color: #aaa;">— ИЛИ —</span>
-        <input type="text" id="room-code" placeholder="КОД КОМНАТЫ" maxlength="5">
-        <button class="btn" onclick="joinGame()">Войти</button>
-    </div>
-</div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+        const gun = Gun(['https://gun-manhattan.herokuapp.com/gun']);
 
-<div id="game-ui">
-    <div id="room-tag">ROOM: <span id="display-room-id">NONE</span></div>
-    <div id="flash"></div>
-    <div id="weapon-layer">
-        <svg class="weapon-img" viewBox="0 0 100 100">
-            <rect x="42" y="60" width="16" height="40" fill="#222" />
-            <rect x="44" y="55" width="12" height="15" fill="#333" />
-            <path d="M44 55 L56 55 L54 30 L46 30 Z" fill="#444" />
-        </svg>
-    </div>
+        const PLAYER_SIZE = 30;
+        const BULLET_SIZE = 6;
+        const BULLET_SPEED = 8;
+        const MOVE_SPEED = 5;
+        const WORLD_WIDTH = 1200;
+        const WORLD_HEIGHT = 1200;
 
-    <div id="left-area" class="joy-area"><div id="joy-l" class="joy-viz"><div class="joy-knob"></div></div></div>
-    <div id="right-area" class="joy-area"><div id="joy-r" class="joy-viz"><div class="joy-knob"></div></div></div>
+        function App() {
+            const [myId] = useState('p_' + Math.random().toString(36).substr(2, 9));
+            const [nick, setNick] = useState('');
+            const [roomCode, setRoomCode] = useState('');
+            const [gameState, setGameState] = useState('menu'); 
+            const [players, setPlayers] = useState({});
+            const [bullets, setBullets] = useState({});
+            const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
 
-    <div id="hud-bottom">
-        <div class="hud-stat"><span class="hud-label">AMMO</span><span class="hud-value">∞</span></div>
-        <div class="hud-stat"><span class="hud-label">HEALTH</span><span id="hp-val" class="hud-value">100</span></div>
-        <div id="marine-face">👿</div>
-        <div class="hud-stat"><span class="hud-label">ARMOR</span><span class="hud-value">0</span></div>
-        <div class="hud-stat"><span class="hud-label">FRAGS</span><span id="frag-val" class="hud-value">0</span></div>
-    </div>
-</div>
+            const canvasRef = useRef(null);
+            const requestRef = useRef();
+            const moveDir = useRef({ x: 0, y: 0 });
+            const myData = useRef({ id: myId, x: 0, y: 0, hp: 100, color: `hsl(${Math.random() * 360}, 70%, 50%)` });
+            const [joystick, setJoystick] = useState({ active: false, x: 0, y: 0, curX: 0, curY: 0 });
 
-<script>
-    // Инициализация Gun (P2P база данных)
-    const gun = Gun(['https://gun-manhattan.herokuapp.com/gun']);
-    const tg = window.Telegram.WebApp;
-    const userName = tg.initDataUnsafe?.user?.first_name || "Marine_" + Math.floor(Math.random()*99);
-
-    let scene, camera, renderer, clock;
-    let currentRoom = "";
-    let myId = 'p_' + Math.random().toString(36).substr(2, 9);
-    let me = { hp: 100, frags: 0 };
-    let others = {};
-    let collisionWalls = [];
-    let controls = { move: {x:0, y:0}, look: {x:0} };
-
-    window.hostGame = () => enterGame(Math.random().toString(36).substring(2, 7).toUpperCase());
-    window.joinGame = () => {
-        const val = document.getElementById('room-code').value.toUpperCase();
-        if(val.length >= 3) enterGame(val);
-    };
-
-    function enterGame(roomId) {
-        currentRoom = roomId;
-        document.getElementById('lobby').style.display = 'none';
-        document.getElementById('game-ui').style.display = 'block';
-        document.getElementById('display-room-id').innerText = currentRoom;
-        
-        initEngine();
-        initControls();
-        initSync();
-    }
-
-    function initEngine() {
-        scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x050000);
-        scene.fog = new THREE.Fog(0x050000, 1, 25);
-        camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-        camera.position.set(Math.random()*5, 1.4, Math.random()*5);
-        renderer = new THREE.WebGLRenderer({ antialias: false });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        document.body.appendChild(renderer.domElement);
-        clock = new THREE.Clock();
-
-        const wallGeo = new THREE.BoxGeometry(4, 3.5, 4);
-        const wallMat = new THREE.MeshBasicMaterial({ color: 0x442222 });
-        for(let i=0; i<20; i++) {
-            const w = new THREE.Mesh(wallGeo, wallMat);
-            w.position.set((Math.floor(Math.random()*10-5))*4, 1.75, (Math.floor(Math.random()*10-5))*4);
-            scene.add(w);
-            collisionWalls.push(new THREE.Box3().setFromObject(w));
-        }
-        loop();
-    }
-
-    function initSync() {
-        const room = gun.get('doom_v1_' + currentRoom);
-
-        // Отправка своих данных
-        setInterval(() => {
-            room.get(myId).put({
-                name: userName,
-                x: camera.position.x,
-                z: camera.position.z,
-                hp: me.hp,
-                frags: me.frags
-            });
-        }, 100);
-
-        // Слушатель других игроков
-        room.map().on((data, id) => {
-            if (!data || id === myId) return;
-            if (id === myId && data.hp <= 0) {
-                me.hp = 100;
-                camera.position.set(Math.random()*10-5, 1.4, Math.random()*10-5);
-                return;
-            }
-            updateOther(id, data);
-        });
-    }
-
-    function updateOther(id, data) {
-        if(!others[id]) {
-            const geometry = new THREE.BoxGeometry(1, 2, 1);
-            const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-            const mesh = new THREE.Mesh(geometry, material);
-            scene.add(mesh);
-            others[id] = mesh;
-        }
-        others[id].position.set(data.x, 1, data.z);
-    }
-
-    function shoot() {
-        const weapon = document.getElementById('weapon-layer');
-        const flash = document.getElementById('flash');
-        weapon.style.transform = 'translateX(-50%) translateY(20px)';
-        flash.style.display = 'block';
-        setTimeout(() => { weapon.style.transform = 'translateX(-50%)'; flash.style.display = 'none'; }, 100);
-
-        const ray = new THREE.Raycaster(camera.position, new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion));
-        Object.keys(others).forEach(id => {
-            if(ray.intersectObject(others[id]).length > 0) {
-                gun.get('doom_v1_' + currentRoom).get(id).get('hp').put(0);
-                me.frags++;
-                document.getElementById('frag-val').innerText = me.frags;
-            }
-        });
-    }
-
-    function initControls() {
-        const setupJoy = (areaId, joyId, cb) => {
-            const area = document.getElementById(areaId);
-            const joy = document.getElementById(joyId);
-            const knob = joy.querySelector('.joy-knob');
-            let start = null;
-            area.addEventListener('touchstart', e => {
-                start = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-                joy.style.display = 'block';
-                joy.style.left = start.x - 30 + 'px'; joy.style.top = start.y - 30 + 'px';
-            });
-            area.addEventListener('touchmove', e => {
-                if(!start) return;
-                let dx = e.touches[0].clientX - start.x, dy = e.touches[0].clientY - start.y;
-                const d = Math.sqrt(dx*dx+dy*dy);
-                if(d > 30) { dx *= 30/d; dy *= 30/d; }
-                knob.style.left = 50 + (dx/30)*50 + '%'; knob.style.top = 50 + (dy/30)*50 + '%';
-                cb(dx/30, dy/30);
-            });
-            area.addEventListener('touchend', () => { start = null; joy.style.display = 'none'; cb(0,0); });
-        };
-        setupJoy('left-area', 'joy-l', (x,y) => { controls.move.x = x; controls.move.y = -y; });
-        setupJoy('right-area', 'joy-r', (x,y) => { controls.look.x = -x; });
-        document.body.addEventListener('touchstart', e => { if(!e.target.classList.contains('joy-area')) shoot(); });
-    }
-
-    function loop() {
-        requestAnimationFrame(loop);
-        camera.rotation.y += controls.look.x * 0.05;
-        const mv = new THREE.Vector3(controls.move.x, 0, -controls.move.y).applyAxisAngle(new THREE.Vector3(0,1,0), camera.rotation.y);
-        camera.position.x += mv.x * 0.15;
-        camera.position.z += mv.z * 0.15;
-        renderer.render(scene, camera);
-    }
-</script>
+            // ... (Вставьте сюда весь JS-код из предыдущего ответа, начиная с логики joinRoom)
+            // Примечание: В этом режиме вместо "export default function" пишите просто "function App"
+            
+            // В конце скрипта:
+            const root = ReactDOM.createRoot(document.getElementById('root'));
+            root.render(<App />);
+        </script>
 </body>
-  </html>
-  
+</html>
