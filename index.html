@@ -3,15 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Cube Brawl P2P</title>
+    <title>Cube Brawl FIX</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { margin: 0; background: #0f172a; overflow: hidden; }
-        canvas { display: block; }
+        body { margin: 0; background: #0f172a; overflow: hidden; font-family: sans-serif; }
+        canvas { display: block; touch-action: none; }
     </style>
 </head>
 <body>
@@ -19,6 +19,8 @@
 
     <script type="text/babel">
         const { useState, useEffect, useRef, useCallback } = React;
+
+        // Инициализация Gun
         const gun = Gun(['https://gun-manhattan.herokuapp.com/gun']);
 
         const PLAYER_SIZE = 30;
@@ -36,19 +38,195 @@
             const [players, setPlayers] = useState({});
             const [bullets, setBullets] = useState({});
             const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
+            const [error, setError] = useState('');
 
             const canvasRef = useRef(null);
             const requestRef = useRef();
             const moveDir = useRef({ x: 0, y: 0 });
-            const myData = useRef({ id: myId, x: 0, y: 0, hp: 100, color: `hsl(${Math.random() * 360}, 70%, 50%)` });
+            const myData = useRef({ id: myId, x: 0, y: 0, hp: 100, nick: '', color: `hsl(${Math.random() * 360}, 70%, 50%)` });
             const [joystick, setJoystick] = useState({ active: false, x: 0, y: 0, curX: 0, curY: 0 });
 
-            // ... (Вставьте сюда весь JS-код из предыдущего ответа, начиная с логики joinRoom)
-            // Примечание: В этом режиме вместо "export default function" пишите просто "function App"
-            
-            // В конце скрипта:
-            const root = ReactDOM.createRoot(document.getElementById('root'));
-            root.render(<App />);
-        </script>
+            // Следим за размером окна
+            useEffect(() => {
+                const res = () => setViewport({ width: window.innerWidth, height: window.innerHeight });
+                window.addEventListener('resize', res);
+                return () => window.removeEventListener('resize', res);
+            }, []);
+
+            const joinRoom = (code) => {
+                if (!nick) { setError('Введите ник!'); return; }
+                const cleanCode = code.trim().toUpperCase();
+                if (cleanCode.length < 3) { setError('Код минимум 3 символа'); return; }
+                
+                myData.current.nick = nick;
+                myData.current.x = Math.random() * (WORLD_WIDTH - 100);
+                myData.current.y = Math.random() * (WORLD_HEIGHT - 100);
+                
+                setRoomCode(cleanCode);
+                setGameState('game');
+            };
+
+            // Сетевая логика
+            useEffect(() => {
+                if (gameState !== 'game' || !roomCode) return;
+
+                const room = gun.get('brawl_v2_' + roomCode);
+
+                // Получаем данные игроков
+                room.get('players').map().on((data, id) => {
+                    if (!data) return;
+                    setPlayers(prev => ({ ...prev, [id]: data }));
+                    if (id === myId) myData.current.hp = data.hp;
+                });
+
+                // Получаем пули
+                room.get('bullets').map().on((data, id) => {
+                    if (!data) {
+                        setBullets(prev => { const n = {...prev}; delete n[id]; return n; });
+                    } else {
+                        setBullets(prev => ({ ...prev, [id]: data }));
+                    }
+                });
+
+                const syncTimer = setInterval(() => {
+                    room.get('players').get(myId).put(myData.current);
+                }, 100);
+
+                return () => clearInterval(syncTimer);
+            }, [gameState, roomCode, myId]);
+
+            const shoot = (targetX, targetY) => {
+                if (myData.current.hp <= 0) return;
+                const camX = myData.current.x + PLAYER_SIZE/2 - viewport.width/2;
+                const camY = myData.current.y + PLAYER_SIZE/2 - viewport.height/2;
+                const angle = Math.atan2((targetY + camY) - (myData.current.y + PLAYER_SIZE/2), (targetX + camX) - (myData.current.x + PLAYER_SIZE/2));
+                
+                const bId = 'b_' + Math.random().toString(36).substr(2, 9);
+                const bData = {
+                    ownerId: myId,
+                    x: myData.current.x + PLAYER_SIZE/2,
+                    y: myData.current.y + PLAYER_SIZE/2,
+                    vx: Math.cos(angle) * BULLET_SPEED,
+                    vy: Math.sin(angle) * BULLET_SPEED,
+                    createdAt: Date.now()
+                };
+                
+                const room = gun.get('brawl_v2_' + roomCode);
+                room.get('bullets').get(bId).put(bData);
+                setTimeout(() => room.get('bullets').get(bId).put(null), 1500);
+            };
+
+            useEffect(() => {
+                if (gameState !== 'game') return;
+
+                const render = () => {
+                    // Физика
+                    if (myData.current.hp > 0) {
+                        myData.current.x = Math.max(0, Math.min(WORLD_WIDTH - PLAYER_SIZE, myData.current.x + moveDir.current.x * MOVE_SPEED));
+                        myData.current.y = Math.max(0, Math.min(WORLD_HEIGHT - PLAYER_SIZE, myData.current.y + moveDir.current.y * MOVE_SPEED));
+                    }
+
+                    const canvas = canvasRef.current;
+                    if (!canvas) return;
+                    const ctx = canvas.getContext('2d');
+                    ctx.clearRect(0, 0, viewport.width, viewport.height);
+
+                    const camX = myData.current.x + PLAYER_SIZE/2 - viewport.width/2;
+                    const camY = myData.current.y + PLAYER_SIZE/2 - viewport.height/2;
+
+                    // Фон
+                    ctx.strokeStyle = '#1e293b';
+                    for(let x=0; x<=WORLD_WIDTH; x+=50) { ctx.beginPath(); ctx.moveTo(x-camX, -camY); ctx.lineTo(x-camX, WORLD_HEIGHT-camY); ctx.stroke(); }
+                    for(let y=0; y<=WORLD_HEIGHT; y+=50) { ctx.beginPath(); ctx.moveTo(-camX, y-camY); ctx.lineTo(WORLD_WIDTH-camX, y-camY); ctx.stroke(); }
+
+                    // Пули
+                    Object.entries(bullets).forEach(([id, b]) => {
+                        const age = (Date.now() - b.createdAt) / 16;
+                        const bx = b.x + b.vx * age;
+                        const by = b.y + b.vy * age;
+                        ctx.fillStyle = '#fbbf24';
+                        ctx.beginPath(); ctx.arc(bx-camX, by-camY, BULLET_SIZE, 0, Math.PI*2); ctx.fill();
+
+                        if (b.ownerId === myId) {
+                            Object.values(players).forEach(p => {
+                                if (p.id !== myId && p.hp > 0 && bx > p.x && bx < p.x + PLAYER_SIZE && by > p.y && by < p.y + PLAYER_SIZE) {
+                                    gun.get('brawl_v2_' + roomCode).get('players').get(p.id).get('hp').put(p.hp - 10);
+                                    gun.get('brawl_v2_' + roomCode).get('bullets').get(id).put(null);
+                                }
+                            });
+                        }
+                    });
+
+                    // Игроки
+                    Object.values(players).forEach(p => {
+                        if (p.hp <= 0) return;
+                        ctx.fillStyle = p.color;
+                        ctx.beginPath(); ctx.roundRect(p.x-camX, p.y-camY, PLAYER_SIZE, PLAYER_SIZE, 5); ctx.fill();
+                        ctx.fillStyle = 'white'; ctx.font = '10px Arial'; ctx.textAlign = 'center';
+                        ctx.fillText(p.nick, p.x-camX + PLAYER_SIZE/2, p.y-camY - 5);
+                    });
+
+                    requestRef.current = requestAnimationFrame(render);
+                };
+                requestRef.current = requestAnimationFrame(render);
+                return () => cancelAnimationFrame(requestRef.current);
+            }, [gameState, players, bullets, viewport, roomCode, myId]);
+
+            if (gameState === 'menu') {
+                return (
+                    <div className="h-screen flex items-center justify-center p-4">
+                        <div className="bg-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-xs text-white border-b-4 border-black">
+                            <h1 className="text-2xl font-black text-yellow-400 mb-6 text-center">CUBE BRAWL</h1>
+                            <input type="text" placeholder="НИК" value={nick} onChange={e=>setNick(e.target.value)} 
+                                   className="w-full bg-slate-900 p-3 rounded-lg mb-4 outline-none border border-slate-700 focus:border-yellow-400"/>
+                            <button onClick={()=>joinRoom(Math.random().toString(36).substr(2,5))} 
+                                    className="w-full bg-yellow-500 text-black font-bold py-3 rounded-lg mb-2">СОЗДАТЬ</button>
+                            <div className="flex gap-2">
+                                <input type="text" placeholder="КОД" value={roomCode} onChange={e=>setRoomCode(e.target.value)} 
+                                       className="w-1/2 bg-slate-900 p-3 rounded-lg outline-none border border-slate-700"/>
+                                <button onClick={()=>joinRoom(roomCode)} className="w-1/2 bg-blue-600 font-bold rounded-lg">ВХОД</button>
+                            </div>
+                            {error && <p className="text-red-400 text-xs mt-2 text-center">{error}</p>}
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="relative h-screen w-screen overflow-hidden touch-none">
+                    <canvas ref={canvasRef} width={viewport.width} height={viewport.height}
+                        onTouchStart={e => {
+                            const t = e.touches[0];
+                            if(t.clientX < viewport.width/2) setJoystick({active:true, x:t.clientX, y:t.clientY, curX:t.clientX, curY:t.clientY});
+                            else shoot(t.clientX, t.clientY);
+                        }}
+                        onTouchMove={e => {
+                            if(!joystick.active) return;
+                            const t = Array.from(e.touches).find(t => t.clientX < viewport.width/2);
+                            if(t) {
+                                const dx = t.clientX - joystick.x, dy = t.clientY - joystick.y;
+                                const dist = Math.sqrt(dx*dx+dy*dy);
+                                const r = Math.min(dist, 40) / dist;
+                                setJoystick(p => ({...p, curX: joystick.x + dx*r, curY: joystick.y + dy*r}));
+                                moveDir.current = {x: (dx*r)/40, y: (dy*r)/40};
+                            }
+                        }}
+                        onTouchEnd={() => { setJoystick({active:false}); moveDir.current = {x:0, y:0}; }}
+                    />
+                    {joystick.active && (
+                        <div className="absolute rounded-full bg-white/10 border border-white/20" 
+                             style={{left: joystick.x-40, top: joystick.y-40, width: 80, height: 80}}>
+                            <div className="absolute rounded-full bg-white/50" 
+                                 style={{left: joystick.curX-joystick.x+20, top: joystick.curY-joystick.y+20, width: 40, height: 40}}/>
+                        </div>
+                    )}
+                    <div className="absolute top-2 left-2 bg-black/40 text-[10px] text-white p-1 rounded">ROOM: {roomCode}</div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
 </body>
 </html>
